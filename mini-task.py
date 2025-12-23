@@ -1,104 +1,85 @@
 from queue import Queue
 import threading
-import numpy as np
 import time
 
-def consumer_operation(tup):
-    size, value, times = tup
-    matrix = np.zeros((size, size))
-    for i in range(size):
-        for j in range(size):
-            matrix[i, j] = value ** (i + j)
-    matrix = np.linalg.matrix_power(matrix, times)
-    return np.sum(matrix)
+num_consumers = 10
+num_tasks = 30
+
+
+def matrix_mult(a, b):
+    n = len(a)
+    result = [[0] * n for _ in range(n)]
+    for i in range(n):
+        for j in range(n):
+            for k in range(n):
+                result[i][j] += a[i][k] * b[k][j]
+    return result
+
+
+def matrix_pow(mat, n):
+    if n == 0:
+        size = len(mat)
+        return [[1 if i == j else 0 for j in range(size)] for i in range(size)]
+    result = mat
+    for _ in range(n - 1):
+        result = matrix_mult(result, mat)
+    return result
+
+
+def consumer_operation(task):
+    size, value, times = task
+    matrix = [[value ** (i + j) for j in range(1, size + 1)] for i in range(1, size + 1)]
+    return matrix_pow(matrix, times)
 
 class Producer(threading.Thread):
-    def __init__(self, stack, task_num, lock):
-         super().__init__()
-         self.task = stack
-         self.num_tasks = task_num
-         self.lock = lock
-    
+    def __init__(self, queue, num_tasks):
+        super().__init__()
+        self.queue = queue
+        self.num_tasks = num_tasks
+
     def run(self):
         for i in range(1, self.num_tasks + 1):
-            task = (i * 2, 2, 2)
-            self.task.put(task)
-            with self.lock:
-                print(f'Producer add task {i} with size: {i}, value: {2}, powered to: {2}')
-            
-        
-        for _ in range(self.num_tasks):
-            with self.lock:
-                self.task.put(None)
-    
+            task = (i * 2, 2, 8)
+            self.queue.put(task)
+
 
 class Consumer(threading.Thread):
-    def __init__(self, id, stack, results, lock):
+    def __init__(self, queue, consumer_id):
         super().__init__()
-        self.consumer_id = id
-        self.stack = stack
-        self.results = results
-        self.count = 0
-        self.lock = lock
-    
+        self.queue = queue
+        self.consumer_id = consumer_id
 
     def run(self):
         while True:
-            task = self.stack.get()
+            task = self.queue.get()
             if task is None:
-                self.stack.put(None)
-                with self.lock:
-                    print(f'Consumer {self.consumer_id} finished. Completed {self.count} tasks')
                 break
-
-            start = time.time()
             result = consumer_operation(task)
-            execution_time = time.time() - start
-            with self.lock:
-                self.results.append((self.consumer_id, task, result, execution_time))
-                print(f'Consumer {self.consumer_id}: '
-                      f'task: {task}, result: {result}, time: {execution_time}')
-            
-            self.count += 1
+            print(f"Consumer {self.consumer_id}: обработана матрица {len(result)}x{len(result)}")
 
 
-def main_run(num_consumers, num_tasks):
-    task_queue = Queue()
-    lock = threading.Lock()
-    results = []
-    producer = Producer(task_queue, num_tasks, lock)
-    consumers = []
-    for i in range(num_consumers):
-        consumer = Consumer(i + 1, task_queue, results, lock)
-        consumers.append(consumer)
-    
+def main():
+    global num_tasks
+    global num_consumers
+
+    queue = Queue()
+
+    producer = Producer(queue, num_tasks)
+    consumers = [Consumer(queue, i) for i in range(num_consumers)]
+
     start = time.time()
     producer.start()
     for consumer in consumers:
         consumer.start()
+
     producer.join()
+    for _ in range(num_consumers):
+        queue.put(None)
+
     for consumer in consumers:
         consumer.join()
-    total = time.time() - start
 
-    print(f'Total tasks completed: {num_tasks} '
-          f'Total consumers: {num_consumers} '
-          f'Total time: {total:.4f}')
-    
-    consumer_stats = {}
-    for consumer_id, task, result, proc_time in results:
-        if consumer_id not in consumer_stats:
-            consumer_stats[consumer_id] = {'count': 0, 'total_time': 0}
-        consumer_stats[consumer_id]['count'] += 1
-        consumer_stats[consumer_id]['total_time'] += proc_time
-    
-    for consumer_id, stats in consumer_stats.items():
-        print(f"Consumer {consumer_id}: "
-              f"{stats['count']} tasks, "
-              f"total time: {stats['total_time']:.4f}, "
-              f"average time: {stats['total_time']/stats['count']:.4f}")
-    
-    return total, consumer_stats
+    print(f"Время выполнения: {time.time() - start:.2f} сек")
 
 
-main_run(20, 500)
+main()
